@@ -119,21 +119,24 @@
 #include <android/hardware/configstore/1.1/types.h>
 #include <android/hardware/power/1.0/IPower.h>
 #include <configstore/Utils.h>
+
+#include <layerproto/LayerProtoParser.h>
+#include "SurfaceFlingerProperties.h"
+
+#ifdef QCOM_UM_FAMILY
 #include <vendor/display/config/1.1/IDisplayConfig.h>
 #include <vendor/display/config/1.2/IDisplayConfig.h>
 #include <vendor/display/config/1.6/IDisplayConfig.h>
 #include <vendor/display/config/1.7/IDisplayConfig.h>
 #include <vendor/display/config/1.9/IDisplayConfig.h>
 #include <composer_extn_intf.h>
-
-#include <layerproto/LayerProtoParser.h>
-#include "SurfaceFlingerProperties.h"
 #include "gralloc_priv.h"
 #include "frame_extn_intf.h"
 #include "smomo_interface.h"
 #include "layer_extn_intf.h"
 
 composer::ComposerExtnLib composer::ComposerExtnLib::g_composer_ext_lib_;
+#endif
 
 namespace android {
 
@@ -289,6 +292,7 @@ std::string decodeDisplayColorSetting(DisplayColorSetting displayColorSetting) {
 
 SurfaceFlingerBE::SurfaceFlingerBE() : mHwcServiceName(getHwcServiceName()) {}
 
+#ifdef QCOM_UM_FAMILY
 bool LayerExtWrapper::Init() {
     mLayerExtLibHandle = dlopen(LAYER_EXTN_LIBRARY_NAME, RTLD_NOW);
     if (!mLayerExtLibHandle) {
@@ -330,8 +334,10 @@ std::unique_ptr<LayerExtWrapper> LayerExtWrapper::Create() {
 int LayerExtWrapper::getLayerClass(const std::string &name) {
   return mInst->GetLayerClass(name);
 }
+#endif
 
 LayerExtWrapper::~LayerExtWrapper() {
+#ifdef QCOM_UM_FAMILY
     if (mInst) {
         mLayerExtDestroyFunc(mInst);
     }
@@ -339,6 +345,7 @@ LayerExtWrapper::~LayerExtWrapper() {
     if (mLayerExtLibHandle) {
       dlclose(mLayerExtLibHandle);
     }
+#endif
 }
 
 SurfaceFlinger::SurfaceFlinger(Factory& factory, SkipInitializationTag)
@@ -494,18 +501,23 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
         setenv("TREBLE_TESTING_OVERRIDE", "true", true);
     }
 
-    property_get("vendor.display.use_layer_ext", value, "0");
-    int_value = atoi(value);
-    if (int_value) {
-        mUseLayerExt = true;
-    }
-
+#ifdef QCOM_UM_FAMILY
     property_get("vendor.display.use_smooth_motion", value, "0");
     int_value = atoi(value);
     if (int_value) {
         mUseSmoMo = true;
     }
+    property_get("vendor.display.use_layer_ext", value, "0");
+    int_value = atoi(value);
+    if (int_value) {
+        mUseLayerExt = true;
+    }
+#else
+    mUseSmoMo = false;
+    mUseLayerExt = true;
+#endif
 
+#ifdef QCOM_UM_FAMILY
     mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
     if (!mDolphinHandle) {
         ALOGW("Unable to open libdolphin.so: %s.", dlerror());
@@ -519,8 +531,11 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
         }
         if (!mDolphinFuncsEnabled) dlclose(mDolphinHandle);
     }
+#else
+    mDolphinHandle = nullptr;
+#endif
 
-
+#ifdef QCOM_UM_FAMILY
     mFrameExtnLibHandle = dlopen(EXTENSION_LIBRARY_NAME, RTLD_NOW);
     if (!mFrameExtnLibHandle) {
         ALOGE("Unable to open libframeextension.so: %s.", dlerror());
@@ -542,6 +557,9 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
             dlclose(mFrameExtnLibHandle);
         }
     }
+#else
+    mFrameExtnLibHandle = nullptr;
+#endif
 }
 
 void SurfaceFlinger::onFirstRef()
@@ -551,6 +569,7 @@ void SurfaceFlinger::onFirstRef()
 
 SurfaceFlinger::~SurfaceFlinger()
 {
+#ifdef QCOM_UM_FAMILY
     if (mDolphinFuncsEnabled) dlclose(mDolphinHandle);
     if (mFrameExtn) dlclose(mFrameExtnLibHandle);
 
@@ -558,6 +577,7 @@ SurfaceFlinger::~SurfaceFlinger()
         mSmoMoDestroyFunc(mSmoMo);
         dlclose(mSmoMoLibHandle);
     }
+#endif
 }
 
 void SurfaceFlinger::setTranslate(int x, int y, const DisplayDeviceState& state){
@@ -925,6 +945,7 @@ void SurfaceFlinger::init() {
                                         mPhaseOffsets->getOffsetThresholdForNextVsync());
     }
 
+#ifdef QCOM_UM_FAMILY
     if (mUseLayerExt) {
         mLayerExt = LayerExtWrapper::Create();
         if (!mLayerExt) {
@@ -988,6 +1009,7 @@ void SurfaceFlinger::init() {
             }
         }
     }
+#endif
 
     ALOGV("Done initializing");
 }
@@ -1867,6 +1889,7 @@ void SurfaceFlinger::onRefreshReceived(int sequenceId, hwc2_display_t /*hwcDispl
 }
 
 void SurfaceFlinger::updateFrameScheduler() NO_THREAD_SAFETY_ANALYSIS {
+#ifdef QCOM_UM_FAMILY
     if (!mFrameSchedulerExtnIntf) {
         return;
     }
@@ -1897,6 +1920,9 @@ void SurfaceFlinger::updateFrameScheduler() NO_THREAD_SAFETY_ANALYSIS {
             mVsyncModulator.onRefreshRateChangeCompleted();
         }
     }
+#else
+    return;
+#endif
 }
 
 void SurfaceFlinger::setVsyncEnabled(bool enabled) {
@@ -2270,6 +2296,7 @@ bool SurfaceFlinger::handleMessageInvalidate() {
 }
 
 void SurfaceFlinger::setDisplayAnimating(const sp<DisplayDevice>& hw) {
+#ifdef QCOM_UM_FAMILY
     static android::sp<vendor::display::config::V1_1::IDisplayConfig> disp_config_v1_1 =
                                         vendor::display::config::V1_1::IDisplayConfig::getService();
 
@@ -2295,9 +2322,11 @@ void SurfaceFlinger::setDisplayAnimating(const sp<DisplayDevice>& hw) {
 
     disp_config_v1_1->setDisplayAnimating(*dpy, hasScreenshot);
     hw->setAnimating(hasScreenshot);
+#endif
 }
 
 void SurfaceFlinger::setLayerAsMask(const sp<const DisplayDevice>& hw, const uint64_t& layerId) {
+#ifdef QCOM_UM_FAMILY
     static android::sp<vendor::display::config::V1_7::IDisplayConfig> disp_config_v1_7 =
                                         vendor::display::config::V1_7::IDisplayConfig::getService();
     const std::optional<DisplayId>& displayId = hw->getId();
@@ -2306,6 +2335,7 @@ void SurfaceFlinger::setLayerAsMask(const sp<const DisplayDevice>& hw, const uin
       return;
     }
     disp_config_v1_7->setLayerAsMask(*dpy, layerId);
+#endif
 }
 
 void SurfaceFlinger::calculateWorkingSet() {
@@ -2683,6 +2713,7 @@ void SurfaceFlinger::postComposition()
         mRegionSamplingThread->notifyNewContent();
     }
 
+#ifdef QCOM_UM_FAMILY
     if (mUseSmoMo) {
         ATRACE_NAME("SmoMoUpdateState");
         Mutex::Autolock lock(mStateLock);
@@ -2718,6 +2749,7 @@ void SurfaceFlinger::postComposition()
 
         mSmoMo->UpdateSmomoState(layers, fps);
     }
+#endif
 
     // Even though ATRACE_INT64 already checks if tracing is enabled, it doesn't prevent the
     // side-effect of getTotalSize(), so we check that again here
@@ -3507,6 +3539,7 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                     mDisplays.emplace(displayToken,
                                       setupNewDisplayDeviceInternal(displayToken, displayId, state,
                                                                     dispSurface, producer));
+#ifdef QCOM_UM_FAMILY
                     // Check if power mode override is available and supported by HWC.
                     {
                         using vendor::display::config::V1_7::IDisplayConfig;
@@ -3521,7 +3554,6 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                             }
                         }
                     }
-
                     {
                         using vendor::display::config::V1_9::IDisplayConfig;
                         android::sp<IDisplayConfig> disp_config_v1_9 =
@@ -3535,6 +3567,8 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                             }
                         }
                     }
+#endif
+
                     if (!state.isVirtual()) {
                         sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
                         if (mPluggableVsyncPrioritized && !display->getIsDisplayBuiltInType()) {
@@ -5381,17 +5415,26 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
         return;
     }
 
+#ifdef QCOM_UM_FAMILY
     const auto displayId = display->getId();
     const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
+#endif
 
     // Fallback to default power state behavior as HWC does not support power mode override.
+    bool shouldSetPowerModeOnMainThread = !display->getPowerModeOverrideConfig();
+
+#ifdef QCOM_UM_FAMILY
     using vendor::display::config::V1_7::IDisplayConfig;
     static android::sp<IDisplayConfig> disp_config_v1_7 = IDisplayConfig::getService();
-    if ((disp_config_v1_7 == NULL) || !display->getPowerModeOverrideConfig()) {
+    shouldSetPowerModeOnMainThread = disp_config_v1_7 == NULL || shouldSetPowerModeOnMainThread;
+#endif
+
+    if (shouldSetPowerModeOnMainThread) {
        setPowerModeOnMainThread(displayToken, mode);
        return;
     }
 
+#ifdef QCOM_UM_FAMILY
     // Call into HWC to change hardware power state first, followed by surfaceflinger
     // power state while stepping up i.e. off -> on, dozesuspend -> doze/on.
     // Let surfaceflinger power state change happen first, followed by hardware power
@@ -5403,6 +5446,7 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
         case HWC_POWER_MODE_DOZE_SUSPEND: hwcMode = IDisplayConfig::PowerMode::DozeSuspend; break;
         default:                          hwcMode = IDisplayConfig::PowerMode::Off;         break;
     }
+#endif
 
     bool step_up = false;
     int currentMode = display->getPowerMode();
@@ -5416,18 +5460,23 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
         }
     }
 
+#ifdef QCOM_UM_FAMILY
     // Change hardware state first while stepping up.
     if (step_up) {
         disp_config_v1_7->setPowerMode(*hwcDisplayId, hwcMode);
     }
+#endif
 
     // Change SF state now.
     setPowerModeOnMainThread(displayToken, mode);
 
+#ifdef QCOM_UM_FAMILY
     // Change hardware state now while stepping down.
     if (!step_up) {
         disp_config_v1_7->setPowerMode(*hwcDisplayId, hwcMode);
     }
+#endif
+
 }
 
 // ---------------------------------------------------------------------------
@@ -7384,6 +7433,7 @@ void SurfaceFlinger::setAllowedDisplayConfigsInternal(const sp<DisplayDevice>& d
 }
 
 bool SurfaceFlinger::canAllocateHwcDisplayIdForVDS(uint64_t usage) {
+#ifdef QCOM_UM_FAMILY
     uint64_t flag_mask_pvt_wfd = ~0;
     uint64_t flag_mask_hw_video = ~0;
     char value[PROPERTY_VALUE_MAX] = {};
@@ -7399,6 +7449,10 @@ bool SurfaceFlinger::canAllocateHwcDisplayIdForVDS(uint64_t usage) {
                         (usage & GRALLOC_USAGE_SW_READ_OFTEN));
     return (allowHwcForVDS || ((usage & flag_mask_pvt_wfd) &&
             (usage & flag_mask_hw_video)));
+#else
+    sDirectStreaming = false;
+    return false;
+#endif
 }
 
 bool SurfaceFlinger::skipColorLayer(const char* layerType) {
